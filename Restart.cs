@@ -19,8 +19,9 @@ namespace OfficialSpeedrunMod
         {
             _spawn = target;
             _spawnMap = LevelTimer.MapId();
-            if (TeleportTargets.Teleport(target))
-                LevelTimer.Reset(target.StartsLevel);
+            if (!TeleportTargets.Teleport(target)) return;
+            LevelTimer.Reset(target.StartsLevel);
+            ForgetAreaName();
         }
 
         // The restart key (see Hotkeys).
@@ -33,6 +34,7 @@ namespace OfficialSpeedrunMod
             }
             if (!TeleportTargets.Teleport(_spawn)) return;
             LevelTimer.Reset(_spawn.StartsLevel);
+            ForgetAreaName();
 
             // Ended the way the NPC's dialogue quits it, so the game hides its timer and plays
             // the exit sound.
@@ -42,6 +44,15 @@ namespace OfficialSpeedrunMod
                 challenge.QuitChallenge();
                 SpeedrunPlugin.Logger.LogInfo("Restart: NPC challenge ended.");
             }
+        }
+
+        // ShowAreaName skips the area it showed last, so going back to the same spawn would
+        // cross its area trigger without the name ("The End" confirms a Server Room run).
+        // Forgetting it shows the name again, as when you come from another level.
+        private static void ForgetAreaName()
+        {
+            var notifier = PlayerRef.LocalPlayer?.GameRefs?.NotifierManager;
+            if (notifier != null) notifier.currentArea = null;
         }
     }
 }
