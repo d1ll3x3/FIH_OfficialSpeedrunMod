@@ -10,7 +10,7 @@ using System.IO;
 
 namespace OfficialSpeedrunMod
 {
-    [BepInPlugin("com.flippingishard.officialspeedrunmod", "FIH Official Speedrun Mod", "1.1.0")]
+    [BepInPlugin("com.flippingishard.officialspeedrunmod", "FIH Official Speedrun Mod", "1.1.1")]
     public class SpeedrunPlugin : BasePlugin
     {
         internal static ManualLogSource Logger { get; private set; }
