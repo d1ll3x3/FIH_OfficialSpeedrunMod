@@ -54,10 +54,6 @@ namespace OfficialSpeedrunMod
             return mods;
         }
 
-        public static bool IsModifier(KeyCode key)
-            => key == KeyCode.LeftControl || key == KeyCode.RightControl || key == KeyCode.LeftShift ||
-               key == KeyCode.RightShift || key == KeyCode.LeftAlt || key == KeyCode.RightAlt || key == KeyCode.AltGr;
-
         // Its key went down this frame with at least its modifiers held.
         public bool WasPressed(Mods held) => !IsNone && (held & Modifiers) == Modifiers && Input.GetKeyDown(Key);
 
@@ -90,37 +86,13 @@ namespace OfficialSpeedrunMod
             Consider(ModConfig.RestartKey, Restart.Go);
             if (TeleportTargets.IsPlayerReady() && TeleportTargets.IsStoryMap())
             {
-                // The lists are only rebuilt when the menu opens; a first hotkey before that
-                // needs them built.
+                // The lists are only rebuilt when the phone app opens; a first hotkey before
+                // that needs them built.
                 TeleportTargets.Refresh();
                 foreach (var target in TeleportTargets.Levels.Concat(TeleportTargets.Npcs))
                     Consider(ModConfig.TeleportHotkey(target), () => Restart.GoTo(target));
             }
             best?.Invoke();
         }
-
-        // The next key pressed, with the modifiers held, for binding one. None while only
-        // modifiers are down; Escape cancels (returns true with no key).
-        public static bool TryCapture(out Hotkey hotkey)
-        {
-            hotkey = default;
-            if (!Input.anyKeyDown) return false;
-            foreach (KeyCode key in AllKeys)
-            {
-                if (!Input.GetKeyDown(key)) continue;
-                if (key == KeyCode.Escape) return true;
-                hotkey = new Hotkey(Hotkey.HeldModifiers(), key);
-                return true;
-            }
-            return false;
-        }
-
-        // Every keyboard key but the modifiers. Mouse buttons can't be bound (the click that
-        // started the capture would be).
-        private static readonly KeyCode[] AllKeys = ((KeyCode[])Enum.GetValues(typeof(KeyCode)))
-            .Where(k => k != KeyCode.None && !(k >= KeyCode.Mouse0 && k <= KeyCode.Mouse6) &&
-                        k < KeyCode.JoystickButton0 && !Hotkey.IsModifier(k))
-            .Distinct()
-            .ToArray();
     }
 }

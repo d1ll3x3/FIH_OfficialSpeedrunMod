@@ -1,19 +1,16 @@
 using EHS;
-using EHS.Interactables;
 using UnityEngine;
 
 namespace OfficialSpeedrunMod
 {
     // The last spawn and the restart key. The spawn is the last place the menu or a teleport
     // hotkey took you (a level or an NPC). The restart key takes you back there and starts
-    // the attempt over: the level timer back to 0, and the NPC challenge in progress
-    // restarted at 0 and held there until you move.
+    // the attempt over: the level timer back to 0, and the NPC challenge in progress ended.
     public static class Restart
     {
         private static TeleportTarget _spawn;
         // The map the spawn belongs to: its coordinates mean nothing on another one.
         private static string _spawnMap = "";
-        private static bool _holdChallenge;
 
         public static TeleportTarget Spawn => _spawn;
 
@@ -23,14 +20,8 @@ namespace OfficialSpeedrunMod
             _spawn = target;
             _spawnMap = LevelTimer.MapId();
             if (TeleportTargets.Teleport(target))
-                LevelTimer.Reset(target.StartsLevel, -1);
+                LevelTimer.Reset(target.StartsLevel);
         }
-
-        public static void Update() => HoldChallenge();
-
-        // Also after every Update: the challenge adds its frame time in its own Update, which
-        // can run after this mod's.
-        public static void LateUpdate() => HoldChallenge();
 
         // The restart key (see Hotkeys).
         public static void Go()
@@ -41,29 +32,16 @@ namespace OfficialSpeedrunMod
                 return;
             }
             if (!TeleportTargets.Teleport(_spawn)) return;
-            LevelTimer.Reset(_spawn.StartsLevel, -1);
+            LevelTimer.Reset(_spawn.StartsLevel);
 
+            // Ended the way the NPC's dialogue quits it, so the game hides its timer and plays
+            // the exit sound.
             var challenge = PlayerRef.LocalPlayer?.GameRefs?.NpcChallengeManager?.ActiveChallenge;
-            if (challenge != null && challenge.IsActive && challenge.RestartChallenge())
+            if (challenge != null && challenge.IsActive)
             {
-                _holdChallenge = true;
-                SpeedrunPlugin.Logger.LogInfo("Restart: NPC challenge restarted.");
+                challenge.QuitChallenge();
+                SpeedrunPlugin.Logger.LogInfo("Restart: NPC challenge ended.");
             }
-        }
-
-        // Keeps the restarted challenge at 0 until the player moves. If the spawn is outside
-        // the challenge's area the game cancels it on its own, and the hold ends with it.
-        private static void HoldChallenge()
-        {
-            if (!_holdChallenge) return;
-            var player = PlayerRef.LocalPlayer;
-            NpcChallengeController challenge = player?.GameRefs?.NpcChallengeManager?.ActiveChallenge;
-            if (challenge == null || !challenge.IsActive || GameplayInput.Started(player))
-            {
-                _holdChallenge = false;
-                return;
-            }
-            challenge.elapsedTime = 0d;
         }
     }
 }

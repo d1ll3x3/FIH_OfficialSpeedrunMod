@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using EHS;
 using EHS.Player;
 using UnityEngine;
@@ -7,11 +8,11 @@ using Object = UnityEngine.Object;
 
 namespace OfficialSpeedrunMod
 {
-    // Times each level on its own, the way the game times the run.
+    // Times the level of the spawn you used, the way the game times the run.
     //
     // The game's splits come from its ChangeLevelProgress zones: entering one calls
     // LevelsInfoManager.SetActiveLevelInfo with the run's playtime, and that playtime is
-    // real time (realtimeSinceStartup) that only stops while the game is frozen. So a level
+    // real time (realtimeSinceStartup) that only stops while the game is frozen. So the level
     // starts when the player enters one of its zones and ends when they enter a zone of a
     // later level, and its clock is real time paused while GameManager.IsGameFrozen.
     //
@@ -19,52 +20,63 @@ namespace OfficialSpeedrunMod
     // hooking it: the game skips SetActiveLevelInfo when the level is already the active one,
     // which is exactly the case after a restart, and no game method gets detoured.
     //
-    // After a teleport, and when a level loads, the zones the player is put into belong to
-    // the spawn: until the player moves (the same inputs that start the game's own timer)
-    // entering them starts nothing, so a spawn just before a level times only that level.
-    // The first level of a new run, and a level the menu teleported into, start on that
-    // first move instead, like the game's timer does; a level target placed just before its
-    // level waits for the level's zone like any other spawn.
+    // Only the spawn's level is timed, once per spawn: picking a level in the menu (or its
+    // hotkey, or the restart key) arms it, and reaching the next level ends it. Nothing else
+    // starts it, so passing through other levels never touches their best times. Zones the
+    // teleport itself puts the player into start nothing; if the spawn is already inside the
+    // level, it starts on the first move (the inputs that start the game's own timer).
+    //
+    // Some levels have a fake area trigger (ChangeAreaNotifierFakeOnCollision): it only shows
+    // another area's name, like the fake "The End" before the boss door, and is not a
+    // progress zone. It counts as the level whose zone starts highest below it, the one it
+    // stands in (there, The Server Room), so that level runs from the fake trigger to the
+    // real next one and the level before it ends there.
+    //
+    // While the timer is on, the end of the game ends the level instead of the run (see
+    // GameEndBlock).
     public static class LevelTimer
     {
-        private enum State { Idle, Armed, Running }
+        private enum State { Off, Waiting, Running, Finished }
 
         private static ChangeLevelProgressBase[] _zones = Array.Empty<ChangeLevelProgressBase>();
         private static bool[] _wasInside = Array.Empty<bool>();
         private static IntPtr _zonesBuiltFor;
+        // The fake area triggers and the level each one counts as.
+        private static (TriggerDetectorLocalPlayer detector, int level)[] _fakes = Array.Empty<(TriggerDetectorLocalPlayer, int)>();
+        private static bool[] _wasInsideFake = Array.Empty<bool>();
 
         private static State _state;
+        private static int _levelId = -1;
         private static bool _awaitingMove;
-        private static int _spawnLevel = -1;
-        private static int _armedLevel = -1;
-
-        private static LevelInfoSO _level;
         private static double _elapsed;
         private static double _lastRealtime;
+        // A finished level's time stays on screen until then, like a challenge's result.
+        private static float _resultUntil;
 
-        // The level whose name is shown under the time: the one running, or the one a level
-        // spawn waits for. Its name is looked up when it changes.
-        private static int _shownLevel = -1;
+        // The timed level's name, for its best time entry, looked up when the level changes.
         private static int _namedLevel = -1;
         private static string _levelName = "";
 
-        private static bool _wasGameEnded;
-
         /// <summary>
-        /// Back to 0 at a spawn. <paramref name="startsLevel"/> is the level the spawn is the
-        /// start of (a menu level teleport), which then starts on the first move if the player
-        /// is in it; -1 waits for the next level's zone. <paramref name="spawnLevel"/> is the level the spawn stands
-        /// in, if known.
+        /// Back to 0 at a spawn, armed for <paramref name="level"/>: the level the spawn is
+        /// the start of, or -1 (an NPC spawn) to turn the timer off.
         /// </summary>
-        public static void Reset(int startsLevel, int spawnLevel)
+        public static void Reset(int level)
         {
-            _state = startsLevel >= 0 ? State.Armed : State.Idle;
-            _armedLevel = startsLevel;
-            _shownLevel = startsLevel;
-            _spawnLevel = spawnLevel;
+            _state = level >= 0 ? State.Waiting : State.Off;
+            _levelId = level;
             _awaitingMove = true;
-            _level = null;
             _elapsed = 0d;
+        }
+
+        public static bool IsOn => _state != State.Off;
+
+        // The end of the game reached while the timer is on: the level ends there.
+        public static void OnGameEndReached()
+        {
+            var player = PlayerRef.LocalPlayer;
+            var levels = player?.GameRefs?.LevelsInfoManager;
+            if (_state == State.Running && levels != null) Finish(player, levels);
         }
 
         public static void Update()
@@ -73,45 +85,61 @@ namespace OfficialSpeedrunMod
             var levels = player?.GameRefs?.LevelsInfoManager;
             if (player?.Rb == null || levels == null)
             {
-                LevelTimerView.Hide();
+                LevelTimerView.Hide(player);
                 return;
             }
 
-            if (levels.Pointer != _zonesBuiltFor) OnLevelLoaded(levels, player);
+            if (levels.Pointer != _zonesBuiltFor) OnLevelLoaded(levels);
+
+            // Followed even while off, so arming the timer doesn't see old entries as new.
+            var entered = EnteredLevels();
+            if (_state == State.Off)
+            {
+                LevelTimerView.Hide(player);
+                return;
+            }
 
             Tick();
 
-            bool moved = _awaitingMove && GameplayInput.Started(player);
-            foreach (var info in EnteredLevels())
-                OnLevelEntered(info);
+            switch (_state)
+            {
+                case State.Waiting:
+                    if (_awaitingMove && GameplayInput.Started(player))
+                    {
+                        _awaitingMove = false;
+                        if (IsInsideLevel(_levelId)) Start();
+                    }
+                    else if (!_awaitingMove && entered.Contains(_levelId))
+                    {
+                        Start();
+                    }
+                    break;
+                case State.Running:
+                    if (entered.Any(id => id > _levelId)) Finish(player, levels);
+                    break;
+            }
 
-            if (moved) OnFirstMove(levels, player);
-
-            // The run's end is the last level's end.
-            bool ended = GameManager.IsGameEnded;
-            if (ended && !_wasGameEnded && _state == State.Running) Finish();
-            _wasGameEnded = ended;
-
-            Show(player);
+            Show(player, levels);
         }
 
-        private static void OnLevelLoaded(LevelsInfoManager levels, PlayerRef player)
+        private static void OnLevelLoaded(LevelsInfoManager levels)
         {
             _zonesBuiltFor = levels.Pointer;
             _zones = Object.FindObjectsOfType<ChangeLevelProgressBase>(true);
             _wasInside = new bool[_zones.Length];
             for (int i = 0; i < _zones.Length; i++) _wasInside[i] = IsInside(_zones[i]);
-            Reset(-1, levels.ActiveLevelInfo != null ? levels.ActiveLevelInfo.Id : -1);
-            _wasGameEnded = GameManager.IsGameEnded;
+            _fakes = FindFakeAreas();
+            _wasInsideFake = new bool[_fakes.Length];
+            for (int i = 0; i < _fakes.Length; i++) _wasInsideFake[i] = IsInside(_fakes[i].detector);
+            Reset(-1);
             // Level ids repeat across maps.
             _namedLevel = -1;
-            _levelName = "";
         }
 
-        // Levels whose zone the player entered since last frame.
-        private static List<LevelInfoSO> EnteredLevels()
+        // Ids of the levels whose zone the player entered since last frame.
+        private static List<int> EnteredLevels()
         {
-            var entered = new List<LevelInfoSO>();
+            var entered = new List<int>();
             for (int i = 0; i < _zones.Length; i++)
             {
                 var zone = _zones[i];
@@ -120,67 +148,67 @@ namespace OfficialSpeedrunMod
                 if (inside && !_wasInside[i])
                 {
                     var info = zone.levelInfoHolder?.LevelInfo;
-                    if (info != null) entered.Add(info);
+                    if (info != null) entered.Add(info.Id);
                 }
                 _wasInside[i] = inside;
+            }
+            for (int i = 0; i < _fakes.Length; i++)
+            {
+                var (detector, level) = _fakes[i];
+                if (detector == null) continue;
+                bool inside = IsInside(detector);
+                if (inside && !_wasInsideFake[i]) entered.Add(level);
+                _wasInsideFake[i] = inside;
             }
             return entered;
         }
 
+        // Each fake area trigger, with the level of the zone whose trigger starts highest below
+        // it. One with no zone below counts for nothing.
+        private static (TriggerDetectorLocalPlayer, int)[] FindFakeAreas()
+        {
+            var zoneStarts = new List<(float bottom, int level, string name)>();
+            foreach (var zone in _zones)
+            {
+                var info = zone != null ? zone.levelInfoHolder?.LevelInfo : null;
+                if (info == null || !TryGetBounds(zone.triggerDetectorComponent, out var bounds)) continue;
+                zoneStarts.Add((bounds.min.y, info.Id, TeleportTargets.LevelName(info)));
+            }
+
+            var fakes = new List<(TriggerDetectorLocalPlayer, int)>();
+            foreach (var fake in Object.FindObjectsOfType<ChangeAreaNotifierFakeOnCollision>(true))
+            {
+                var detector = fake.triggerDetectorComponent;
+                if (detector == null) continue;
+                float y = TryGetBounds(detector, out var bounds) ? bounds.center.y : fake.transform.position.y;
+                var below = zoneStarts.Where(z => z.bottom <= y).OrderByDescending(z => z.bottom).ToList();
+                if (below.Count == 0) continue;
+                fakes.Add((detector, below[0].level));
+                SpeedrunPlugin.Logger.LogInfo(
+                    $"Level timer: fake area trigger '{fake.gameObject.name}' at y {y:0.#} counts as {below[0].name}.");
+            }
+            return fakes.ToArray();
+        }
+
+        private static bool TryGetBounds(Component detector, out Bounds bounds)
+        {
+            bounds = default;
+            bool has = false;
+            if (detector == null) return false;
+            foreach (var col in detector.GetComponentsInChildren<Collider>(true))
+            {
+                if (!has) bounds = col.bounds;
+                else bounds.Encapsulate(col.bounds);
+                has = true;
+            }
+            return has;
+        }
+
+        private static bool IsInside(TriggerDetectorLocalPlayer detector) => !detector.IsEmpty();
+
         // Compared as a plain reference: PlayerRef's own == needs FishNet, which this mod
         // doesn't reference. The game clears the field when the player leaves.
         private static bool IsInside(ChangeLevelProgressBase zone) => (object)zone.playerInside != null;
-
-        private static void OnLevelEntered(LevelInfoSO info)
-        {
-            if (_awaitingMove)
-            {
-                _spawnLevel = info.Id;
-                return;
-            }
-
-            switch (_state)
-            {
-                case State.Idle:
-                    if (info.Id != _spawnLevel) Start(info);
-                    break;
-                case State.Running:
-                    // A zone of a lower level is the player falling back: the level goes on.
-                    if (info.Id > _level.Id)
-                    {
-                        Finish();
-                        Start(info);
-                    }
-                    break;
-            }
-        }
-
-        private static void OnFirstMove(LevelsInfoManager levels, PlayerRef player)
-        {
-            _awaitingMove = false;
-
-            if (_state == State.Armed)
-            {
-                // Outside the level, its zone starts it, as for any spawn.
-                if (IsInsideLevel(_armedLevel)) Start(FindLevel(levels, _armedLevel));
-                else _state = State.Idle;
-                return;
-            }
-
-            // A new run: the game's timer is still at 0 and starts on this same move.
-            double playtime = player.PlayerProgressHandler != null ? player.PlayerProgressHandler.Playtime : -1d;
-            if (_state == State.Idle && playtime >= 0d && playtime < 0.05d)
-                Start(FindLevel(levels, _spawnLevel) ?? LevelInside());
-        }
-
-        // The level of a zone the player is in, for a run that loads with the player already
-        // inside the first level's zone (no entry to see).
-        private static LevelInfoSO LevelInside()
-        {
-            foreach (var zone in _zones)
-                if (zone != null && IsInside(zone)) return zone.levelInfoHolder?.LevelInfo;
-            return null;
-        }
 
         private static bool IsInsideLevel(int id)
         {
@@ -189,6 +217,8 @@ namespace OfficialSpeedrunMod
                 var info = zone != null && IsInside(zone) ? zone.levelInfoHolder?.LevelInfo : null;
                 if (info != null && info.Id == id) return true;
             }
+            foreach (var (detector, level) in _fakes)
+                if (level == id && detector != null && IsInside(detector)) return true;
             return false;
         }
 
@@ -200,16 +230,9 @@ namespace OfficialSpeedrunMod
             return null;
         }
 
-        private static void Start(LevelInfoSO info)
+        private static void Start()
         {
-            if (info == null)
-            {
-                _state = State.Idle;
-                return;
-            }
             _state = State.Running;
-            _level = info;
-            _shownLevel = info.Id;
             _elapsed = 0d;
             _lastRealtime = Time.realtimeSinceStartupAsDouble;
         }
@@ -223,38 +246,44 @@ namespace OfficialSpeedrunMod
             _lastRealtime = now;
         }
 
-        private static void Finish()
+        private static void Finish(PlayerRef player, LevelsInfoManager levels)
         {
-            string mapId = MapId();
-            string name = TeleportTargets.LevelName(_level);
-            bool newPb = ModConfig.RecordTime(mapId, _level.Id, name, _elapsed);
+            string name = LevelName(levels);
+            bool newPb = ModConfig.RecordTime(MapId(), _levelId, name, _elapsed);
             SpeedrunPlugin.Logger.LogInfo($"Level {name}: {_elapsed:0.000}s{(newPb ? " (new PB)" : "")}");
+            _state = State.Finished;
+            _resultUntil = Time.unscaledTime + LevelTimerView.ResultDuration(player);
+        }
 
-            _state = State.Idle;
-            _spawnLevel = _level.Id;
-            _level = null;
+        private static string LevelName(LevelsInfoManager levels)
+        {
+            if (_namedLevel != _levelId)
+            {
+                _namedLevel = _levelId;
+                var info = FindLevel(levels, _levelId);
+                _levelName = info != null ? TeleportTargets.LevelName(info) : $"Level {_levelId}";
+            }
+            return _levelName;
         }
 
         // The game's own time format with centiseconds (its run timer and splits stop at
-        // seconds). Monospaced adds TextMeshPro tags, for the on-screen timer only.
+        // seconds). Monospaced adds TextMeshPro tags, which IMGUI would print.
         public static string Format(double time, bool monospaced)
             => TimerUtil.GetTimeParts(time).ToStringCentiseconds(monospaced);
 
         public static string MapId() => PlayerRef.LocalPlayer?.GameRefs?.WorldSaveManager?.GetCurrentProgress()?.MapId ?? "";
 
-        // The time, like the game's timer, and the level under it: 0 while waiting for a level,
-        // frozen on the last level's time when the run ends.
-        private static void Show(PlayerRef player)
+        // On the game's challenge timer, with the level's best time: 0 while waiting, the
+        // running time, then the result for as long as a challenge's result stays up.
+        private static void Show(PlayerRef player, LevelsInfoManager levels)
         {
-            if (_shownLevel != _namedLevel)
+            if (_state == State.Finished && Time.unscaledTime >= _resultUntil)
             {
-                _namedLevel = _shownLevel;
-                var info = FindLevel(player.GameRefs.LevelsInfoManager, _shownLevel);
-                _levelName = info != null ? TeleportTargets.LevelName(info) : "";
+                LevelTimerView.Hide(player);
+                return;
             }
-            string text = Format(_elapsed, true);
-            if (_levelName.Length > 0) text += $"\n<size=55%>{_levelName}</size>";
-            LevelTimerView.Show(player, text);
+            bool hasPb = ModConfig.TryGetPb(MapId(), _levelId, LevelName(levels), out double pb);
+            LevelTimerView.Show(player, _elapsed, hasPb, pb);
         }
     }
 

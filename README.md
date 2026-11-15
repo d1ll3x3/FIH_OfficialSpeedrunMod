@@ -4,51 +4,60 @@ A BepInEx (IL2CPP) plugin for Flipping is Hard for practising levels: the traine
 teleports (every level start and every NPC of the story map), a restart key, a timer for
 each level and the best time of every level.
 
-## Controls
+## The Speedrun app
 
-| Action              | Keyboard / mouse | Gamepad      |
-|---------------------|------------------|--------------|
-| Open / close menu   | B                | LB + RB      |
-| Teleport            | Click a button   | D-Pad + A    |
-| Close               | B, Esc or Close  | B            |
-| Back to the spawn   | R (Hotkeys tab)  |              |
+The mod's menu is a **Speedrun** app in the game's phone (Tab), right after Stats. It is
+made from the phone's own screens, so it looks, navigates and animates like the vanilla
+apps, with the keyboard or a gamepad:
 
-The player is frozen while the menu is open. Picking a target closes the menu and lands
-you there with the camera turned the way the level is climbed.
+- **Levels** and **NPCs**: pick one to close the phone and land there, with the camera
+  turned the way the level is climbed.
+- **Best times**: your best time on every level, and the game's own best time on every NPC
+  challenge. Pick a level twice to reset its time.
+
+The restart key (R by default) takes you back to the spawn while playing.
 
 ## Spawn and restart
 
-The spawn is the last place the menu or a teleport hotkey took you. On the story map,
-levels 2 to 9 land just before the level, so its timer starts as you walk in. The restart
-key (R by default) takes you back there, puts the level timer back to 0 and, if an NPC
-challenge is running, restarts it at 0 and holds it there until you move. A challenge
-whose area the spawn is outside of is cancelled by the game itself.
+The spawn is the last place the app or a teleport hotkey took you. On the story map,
+levels 1 to 10 land just before the level, so its timer starts as you walk in. The restart
+key (R by default) takes you back there, puts the level timer back to 0 and ends the NPC
+challenge in progress, the same way quitting it from the NPC does.
 
 ## Hotkeys
 
-The menu's **Hotkeys** tab binds the restart key and a key to every teleport. Click a key
-and press the new one, holding Ctrl, Shift or Alt for a combo (`Ctrl+Alpha1`); Esc
-cancels and × clears it. They work while playing, not with the menu open. When several
+The restart key and a key for every teleport are set in `OfficialSpeedrunMod.cfg`: a Unity
+key name, optionally with Ctrl, Shift and Alt (`R`, `Alpha1`, `Ctrl+F2`). They work while
+playing, not with the phone open. When several
 match, the one with the most modifiers wins, so `R` and `Shift+R` can do different things.
-They are saved in `OfficialSpeedrunMod.cfg` (`RestartKey` and the `Hotkeys` section).
+They are `RestartKey` and the `Hotkeys` section.
 
 ## Level timer
 
-Shown under the game's timer, as a copy of it: the level's time, and the level under it.
-Times use the game's own clock (real time, paused only while the game is frozen) and
-format, with centiseconds.
+Times the level of the spawn you used: pick a level in the app (or with its hotkey) and
+that level is timed once, from entering it until you reach the next one. The restart key
+arms it again; an NPC teleport or loading a world turns it off. Passing through other
+levels never starts their timer or touches their best times.
 
-- A level starts when you enter it: the same zones the game's splits use. Entering the
-  next level ends it and starts that one.
-- A level the menu teleported you into, and the first level of a new run, start on your
-  first move (move, jump or interact), like the game's timer. A level target moved to
-  just before its level waits for the level's zone instead.
-- The zone a spawn puts you in starts nothing: set the spawn just before a level and its
-  timer starts as you walk in.
+- The level starts when you enter it, through the same zones the game's splits use. If the
+  spawn is already inside it, it starts on your first move (move, jump or interact), like
+  the game's timer.
+- It is shown on the game's NPC challenge timer, in its place and format, with the level's
+  best time; the finished time stays up as long as a challenge's result does. A running
+  NPC challenge takes the timer back until it ends.
+- Times use the game's own clock: real time, paused only while the game is frozen.
+- A fake area trigger, which only shows another area's name (the fake "The End" before the
+  boss door), counts as the level it stands in: Recycling Core ends there, and The Server
+  Room runs from it to the real "The End". The BepInEx log names the level each fake
+  trigger counts as when a world loads.
+- While the timer is on, the end of the game ends the level instead of the run: the end
+  zone stops the timer and the game's ending doesn't start, so practising never finishes
+  the save's run. With the timer off, the game ends as usual.
 
 The best time of every level is saved in `OfficialSpeedrunMod.cfg`, next to the dll
-(section `PersonalBests`, one entry per map and level). The menu's **Best times** tab lists
-them, with the game's own best time of every NPC challenge.
+(section `PersonalBests`, one entry per map and level). The app's **Best times** section lists
+them, with the game's own best time of every NPC challenge; picking a level twice puts its
+time back to none.
 
 ## Watermark
 

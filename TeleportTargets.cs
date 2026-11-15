@@ -10,17 +10,20 @@ namespace OfficialSpeedrunMod
 {
     // One teleport target: where the phone lands (rigidbody position and rotation) and the
     // camera's orbit yaw it lands with. StartsLevel is the id of the level it is the start
-    // of (a level target), or -1.
+    // of (a level target), or -1. Id names it in the config ("Level.5", "Npc.GummyBear"):
+    // the game's own names, so renaming one in the menu doesn't lose its hotkey.
     public sealed class TeleportTarget
     {
+        public readonly string Id;
         public readonly string Name;
         public readonly Vector3 Position;
         public readonly Quaternion Rotation;
         public readonly float CameraYaw;
         public readonly int StartsLevel;
 
-        public TeleportTarget(string name, Vector3 position, Quaternion rotation, float cameraYaw, int startsLevel = -1)
+        public TeleportTarget(string id, string name, Vector3 position, Quaternion rotation, float cameraYaw, int startsLevel = -1)
         {
+            Id = id;
             Name = name;
             Position = position;
             Rotation = rotation;
@@ -70,13 +73,14 @@ namespace OfficialSpeedrunMod
 
         // The story map's spots the level data gets wrong, placed by hand in the game with
         // the phone resting where a run of that level starts: rigidbody position and
-        // rotation, and the camera's orbit yaw. Levels 2 to 9 were placed on 30-oct-2026 just
-        // before the level, so its timer starts as you walk in (see LevelTimer); the others
-        // on 25-oct-2026. L10 is in front of the boss door, under its roof; landing past it
-        // starts the fight's fail-safe.
+        // rotation, and the camera's orbit yaw. Levels 1 to 10 land just before the level, so
+        // its timer starts as you walk in (see LevelTimer): 2 to 9 placed on 30-oct-2026, 1
+        // and 10 on 15-nov-2026; L11 on 25-oct-2026. L10 is before the fake "The End" in front
+        // of the boss door; landing past the door starts the fight's fail-safe.
         private static readonly Dictionary<string, (Vector3 pos, Quaternion rot, float cameraYaw)> FixedTargets =
             new Dictionary<string, (Vector3, Quaternion, float)>
         {
+            ["area:1"] = (new Vector3(107.04f, -22.693f, 427.27f), new Quaternion(0f, 0.05989f, 0f, 0.99821f), -172.8f),
             ["area:2"] = (new Vector3(18.724f, -13.059f, 264.634f), new Quaternion(0f, 0.06909f, 0f, 0.99761f), 5.2f),
             ["area:3"] = (new Vector3(-4.956f, 20.956f, 92.231f), new Quaternion(0f, -0.03929f, 0f, 0.99923f), -4.5f),
             ["area:4"] = (new Vector3(2.669f, 295.231f, -99.07f), new Quaternion(0.97126f, 0f, 0.23803f, 0f), 152.4f),
@@ -85,10 +89,10 @@ namespace OfficialSpeedrunMod
             ["area:7"] = (new Vector3(-132.599f, 2172.341f, -181.957f), new Quaternion(0f, -0.92913f, 0f, 0.36975f), -136.6f),
             ["area:8"] = (new Vector3(-16.755f, 2491.311f, -95.9f), new Quaternion(0f, -0.9622f, 0f, -0.27233f), -32.3f),
             ["area:9"] = (new Vector3(140.339f, 3039.361f, -291.387f), new Quaternion(0f, -0.1188f, 0f, 0.99292f), 165.9f),
-            ["area:10"] = (new Vector3(-171.424f, 3511.64f, -79.893f), new Quaternion(0.71287f, 0f, 0.7013f, 0f), -76f),
+            ["area:10"] = (new Vector3(-84.867f, 3511.655f, -79.653f), new Quaternion(0f, -0.70758f, 0f, -0.70663f), -95.2f),
             ["area:11"] = (new Vector3(-314.231f, 3583.05f, 195.891f), new Quaternion(0f, -0.71351f, 0f, 0.70064f), 140.2f),
             ["npc:GingerbreadFred"] = (new Vector3(-58.053f, 560.423f, -98.186f), new Quaternion(-0.1226f, 0.69639f, 0.6964f, 0.12259f), 166.4f),
-            ["npc:Webby"] =(new Vector3(-88.997f, 986.947f, 176.111f), new Quaternion(-0.25796f, 0.28094f, 0.91968f, 0.0933f), -57.7f),
+            ["npc:Webby"] = (new Vector3(-88.997f, 986.947f, 176.111f), new Quaternion(-0.25796f, 0.28094f, 0.91968f, 0.0933f), -57.7f),
         };
         // The story map's official level names, by level id (1 is the first level). The mod
         // is in English whatever language the game is in, so these replace the game's
@@ -98,9 +102,15 @@ namespace OfficialSpeedrunMod
             "Storm Drain", "Cardboard Fort", "The Playground", "Candyland", "Toy Chest", "The Grid",
             "The Fridge", "Blanket Fort Kingdom", "Recycling Core", "The Server Room", "The End",
         };
-        // NPCs are listed bottom to top, the order they are met in, except where height gets
-        // it wrong: the first of each pair goes right before the second.
-        private static readonly (string first, string second)[] NpcOrderFixes = { ("Muddy", "Plonk") };
+        // The NPCs' official names, in the order they are met, by the name of their object
+        // in the game (CleanNpcName).
+        private static readonly (string id, string name)[] OfficialNpcs =
+        {
+            ("MsElephant", "Miss Elephant"), ("ToySoldier", "Toy Soldier"), ("Muddy", "Muddy"), ("Plonk", "Plonk"),
+            ("GingerbreadFred", "Gingerbread Fred"), ("GummyBear", "Glob"), ("Webby", "Webby"), ("GameDude", "Gamedude"),
+            ("Plix", "Plix"), ("CarlTheAlien", "Carl"), ("Cubert", "Cubert"), ("Eggo", "Eggo"), ("SirDuck", "Sir Duck"),
+            ("Princess", "Princess"), ("Greg", "Greg"), ("Groggy", "Groggy"),
+        };
         // Interactable NPCs left out of the teleport list (not characters to visit).
         private static readonly string[] HiddenNpcs = { "Microwaver", "Phone", "Narrator" };
 
@@ -176,7 +186,8 @@ namespace OfficialSpeedrunMod
                         cameraYaw = yaw;
                         has = true;
                     }
-                    if (has) levelTargets.Add(new TeleportTarget($"{id}. {LevelName(info)}", pos, rot, cameraYaw ?? rot.eulerAngles.y, id));
+                    if (has) levelTargets.Add(new TeleportTarget($"Level.{id}", $"{id}. {LevelName(info)}", pos, rot,
+                        cameraYaw ?? rot.eulerAngles.y, id));
                 }
                 _levels = levelTargets.ToArray();
                 _npcs = FindNpcs(zones, doors, story);
@@ -297,7 +308,7 @@ namespace OfficialSpeedrunMod
 
         private static TeleportTarget[] FindNpcs(List<Zone> zones, Dictionary<int, (Vector3 pos, Quaternion rot)> doors, bool story)
         {
-            var npcs = new List<TeleportTarget>();
+            var npcs = new List<(string id, TeleportTarget target)>();
             foreach (var npc in Object.FindObjectsOfType<InteractableNpc>(true))
             {
                 var t = npc.transform;
@@ -324,25 +335,29 @@ namespace OfficialSpeedrunMod
                     (pos, rot, float yaw) = fixedTarget;
                     cameraYaw = yaw;
                 }
-                npcs.Add(new TeleportTarget(name, pos, rot, cameraYaw ?? rot.eulerAngles.y));
+                npcs.Add((name, new TeleportTarget("Npc." + name.Replace(' ', '_'), NpcName(name), pos, rot,
+                    cameraYaw ?? rot.eulerAngles.y)));
             }
-            return InNpcOrder(npcs, n => n.Name, n => n.Position.y).ToArray();
+            return InNpcOrder(npcs, n => n.id, n => n.target.Position.y).Select(n => n.target).ToArray();
         }
 
-        // Bottom to top, with NpcOrderFixes applied.
-        internal static List<T> InNpcOrder<T>(IEnumerable<T> npcs, Func<T, string> name, Func<T, float> height)
+        // The official name of an NPC, from the name of its object in the game.
+        internal static string NpcName(string id)
         {
-            var list = npcs.OrderBy(height).ToList();
-            foreach (var (first, second) in NpcOrderFixes)
+            foreach (var (npcId, name) in OfficialNpcs)
+                if (string.Equals(npcId, id, StringComparison.OrdinalIgnoreCase)) return name;
+            return id;
+        }
+
+        // In the official order; NPCs not in it go after, bottom to top.
+        internal static List<T> InNpcOrder<T>(IEnumerable<T> npcs, Func<T, string> id, Func<T, float> height)
+        {
+            int Order(T npc)
             {
-                int a = list.FindIndex(n => string.Equals(name(n), first, StringComparison.OrdinalIgnoreCase));
-                int b = list.FindIndex(n => string.Equals(name(n), second, StringComparison.OrdinalIgnoreCase));
-                if (a < 0 || b < 0 || a < b) continue;
-                var npc = list[a];
-                list.RemoveAt(a);
-                list.Insert(b, npc);
+                int i = Array.FindIndex(OfficialNpcs, n => string.Equals(n.id, id(npc), StringComparison.OrdinalIgnoreCase));
+                return i >= 0 ? i : int.MaxValue;
             }
-            return list;
+            return npcs.OrderBy(Order).ThenBy(height).ToList();
         }
 
         // The floor under (or just above) a point, with the phone resting on it; the point

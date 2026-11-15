@@ -1,79 +1,54 @@
-using System;
 using EHS;
-using TMPro;
-using UnityEngine;
-using Object = UnityEngine.Object;
 
 namespace OfficialSpeedrunMod
 {
-    // The level timer on screen, as a copy of the game's own run timer (TimerController's
-    // container and its TextMeshPro text) placed right under it, so it has the game's font,
-    // size and outline. Its text is the game's split format (TimerUtil). The copy belongs to
-    // the game's UI, so a scene change destroys it and it is made again.
+    // The level timer on screen: the game's own NPC challenge timer (NpcChallengeTimerView),
+    // in its place and with its time and best time format, driven through the same
+    // UpdateView its controller calls. A running challenge, or its result, owns the view:
+    // the controller updates and hides it then, and the level timer waits for it to finish.
     public static class LevelTimerView
     {
-        private const string Name = "OfficialSpeedrunMod LevelTimer";
-        // How long to wait before trying again when the copy could not be made.
-        private const float RetryInterval = 2f;
+        // Whether the view is showing a level time (so hiding it is this mod's to do).
+        private static bool _shown;
 
-        private static GameObject _root;
-        private static TextMeshProUGUI _text;
-        private static bool _loggedMissing;
-        private static float _nextAttempt;
+        // How long the game shows a finished challenge's result.
+        private const float DefaultResultDuration = 3f;
 
-        public static void Show(PlayerRef player, string text)
+        public static void Show(PlayerRef player, double time, bool hasBest, double best)
         {
-            if (_root == null && (Time.unscaledTime < _nextAttempt || !Create(player))) return;
-            if (!_root.activeSelf) _root.SetActive(true);
-            _text.text = text;
+            var controller = Controller(player);
+            var view = controller?.timerView;
+            var container = view?.containerT;
+            if (container == null || ChallengeOwns(controller))
+            {
+                _shown = false;
+                return;
+            }
+            if (!container.gameObject.activeSelf) container.gameObject.SetActive(true);
+            view.UpdateView(time, hasBest, best);
+            _shown = true;
         }
 
-        public static void Hide()
+        public static void Hide(PlayerRef player)
         {
-            if (_root != null && _root.activeSelf) _root.SetActive(false);
+            if (!_shown) return;
+            _shown = false;
+            var controller = Controller(player);
+            var container = controller?.timerView?.containerT;
+            if (container == null || ChallengeOwns(controller)) return;
+            container.gameObject.SetActive(false);
         }
 
-        private static bool Create(PlayerRef player)
+        public static float ResultDuration(PlayerRef player)
         {
-            _nextAttempt = Time.unscaledTime + RetryInterval;
-            var source = player.GameRefs?.GameUIManager?.timerController?.containerT?.TryCast<RectTransform>();
-            if (source == null)
-            {
-                if (!_loggedMissing) SpeedrunPlugin.Logger.LogWarning("Level timer: the game's timer UI was not found yet.");
-                _loggedMissing = true;
-                return false;
-            }
-
-            try
-            {
-                _root = Object.Instantiate(source.gameObject, source.parent, false);
-                _root.name = Name;
-                _text = _root.GetComponentInChildren<TextMeshProUGUI>(true);
-                if (_text == null)
-                {
-                    SpeedrunPlugin.Logger.LogWarning("Level timer: the game's timer has no text to copy.");
-                    Object.Destroy(_root);
-                    _root = null;
-                    return false;
-                }
-                // The game hides its timer by switching the text off; the copy is always on.
-                _text.gameObject.SetActive(true);
-                _text.richText = true;
-                _text.overflowMode = TextOverflowModes.Overflow;
-
-                var rt = _root.GetComponent<RectTransform>();
-                rt.anchoredPosition = source.anchoredPosition - new Vector2(0f, source.rect.height);
-                _loggedMissing = false;
-                SpeedrunPlugin.Logger.LogInfo("Level timer: added under the game's timer.");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                SpeedrunPlugin.Logger.LogError($"Level timer: could not copy the game's timer: {ex}");
-                if (_root != null) Object.Destroy(_root);
-                _root = null;
-                return false;
-            }
+            var controller = Controller(player);
+            return controller != null ? controller.completionDisplayDuration : DefaultResultDuration;
         }
+
+        private static NpcChallengeTimerController Controller(PlayerRef player)
+            => player?.GameRefs?.GameUIManager?.npcChallengeTimerController;
+
+        private static bool ChallengeOwns(NpcChallengeTimerController controller)
+            => controller.activeChallenge != null || controller.resultChallenge != null;
     }
 }

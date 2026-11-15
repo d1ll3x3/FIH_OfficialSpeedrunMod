@@ -2,6 +2,7 @@ using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
+using HarmonyLib;
 using Il2CppInterop.Runtime.Injection;
 using UnityEngine;
 using System;
@@ -9,7 +10,7 @@ using System.IO;
 
 namespace OfficialSpeedrunMod
 {
-    [BepInPlugin("com.flippingishard.officialspeedrunmod", "FIH Official Speedrun Mod", "1.0.0")]
+    [BepInPlugin("com.flippingishard.officialspeedrunmod", "FIH Official Speedrun Mod", "1.1.0")]
     public class SpeedrunPlugin : BasePlugin
     {
         internal static ManualLogSource Logger { get; private set; }
@@ -23,6 +24,7 @@ namespace OfficialSpeedrunMod
                 // keeps its best times when it is copied to another install.
                 string folder = Path.GetDirectoryName(typeof(SpeedrunPlugin).Assembly.Location) ?? Paths.ConfigPath;
                 ModConfig.Init(new ConfigFile(Path.Combine(folder, "OfficialSpeedrunMod.cfg"), true));
+                GameEndBlock.Patch(new Harmony("com.flippingishard.officialspeedrunmod"));
 
                 ClassInjector.RegisterTypeInIl2Cpp<SpeedrunBehaviour>();
 
@@ -30,7 +32,7 @@ namespace OfficialSpeedrunMod
                 GameObject.DontDestroyOnLoad(go);
                 go.AddComponent<SpeedrunBehaviour>();
 
-                Logger.LogInfo($"Official Speedrun Mod loaded. B (or LB + RB) opens the teleport menu, {ModConfig.RestartKey.Value} restarts.");
+                Logger.LogInfo($"Official Speedrun Mod loaded. Its menu is the Speedrun app in the phone (Tab); {ModConfig.RestartKey.Value} restarts.");
             }
             catch (Exception ex)
             {
@@ -39,18 +41,11 @@ namespace OfficialSpeedrunMod
         }
     }
 
-    // Drives the teleport menu, the restart key and the level timer. Must have the IntPtr
-    // constructor for IL2CPP interop.
+    // Drives the phone app, the hotkeys, the level timer and the watermark. Must have the
+    // IntPtr constructor for IL2CPP interop.
     public class SpeedrunBehaviour : MonoBehaviour
     {
         public SpeedrunBehaviour(IntPtr ptr) : base(ptr) { }
-
-        private TeleportMenu _menu;
-
-        void Awake()
-        {
-            _menu = new TeleportMenu();
-        }
 
         void Update()
         {
@@ -65,17 +60,16 @@ namespace OfficialSpeedrunMod
 
             try
             {
-                _menu.Update();
+                PhoneApp.Update();
             }
             catch (Exception ex)
             {
-                SpeedrunPlugin.Logger.LogError($"Error in the teleport menu: {ex}");
+                SpeedrunPlugin.Logger.LogError($"Error in the phone app: {ex}");
             }
 
             try
             {
-                Hotkeys.Update(_menu.IsOpen);
-                Restart.Update();
+                Hotkeys.Update(PhoneApp.IsOpen);
             }
             catch (Exception ex)
             {
@@ -99,23 +93,6 @@ namespace OfficialSpeedrunMod
             {
                 SpeedrunPlugin.Logger.LogError($"Error in the watermark: {ex}");
             }
-        }
-
-        void LateUpdate()
-        {
-            try
-            {
-                Restart.LateUpdate();
-            }
-            catch (Exception ex)
-            {
-                SpeedrunPlugin.Logger.LogError($"Error holding the NPC challenge: {ex}");
-            }
-        }
-
-        void OnGUI()
-        {
-            _menu.Draw();
         }
     }
 }
