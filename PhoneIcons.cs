@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.UI;
+using Vec = System.Numerics.Vector2;
 
 namespace OfficialSpeedrunMod
 {
@@ -34,20 +35,20 @@ namespace OfficialSpeedrunMod
         private sealed class Part
         {
             public string Name;
-            public Vector2 Pivot;
-            public Func<Vector2, float> Distance;
+            public Vec Pivot;
+            public Func<Vec, float> Distance;
         }
 
         // A part's pose in a frame: moved, turned (degrees, counterclockwise) and scaled around
         // its pivot. The whole icon has a pose too, around its own pivot.
         private struct Pose
         {
-            public Vector2 Offset;
+            public Vec Offset;
             public float Angle;
-            public Vector2 Scale;
+            public Vec Scale;
             public bool Hidden;
 
-            public static Pose Rest => new Pose { Scale = Vector2.one };
+            public static Pose Rest => new Pose { Scale = Vec.One };
         }
 
         private sealed class Frame
@@ -59,7 +60,7 @@ namespace OfficialSpeedrunMod
 
         private sealed class Flipbook
         {
-            public Vector2 Pivot;
+            public Vec Pivot;
             public Part[] Parts;
             public Frame[] Frames;
             public Sprite[] Sprites;
@@ -98,9 +99,10 @@ namespace OfficialSpeedrunMod
         }
 
         // Plays the flipbook once each time its entry comes on screen, then holds the last
-        // drawing.
+        // drawing. The drawings not made yet (see Book) are made here, one per frame.
         public static void Update()
         {
+            DrawNext();
             _icons.RemoveAll(i => i.Card == null);
             foreach (var icon in _icons)
             {
@@ -118,20 +120,46 @@ namespace OfficialSpeedrunMod
                 var frames = icon.Book.Frames;
                 int frame = 0;
                 while (frame + 1 < frames.Length && frames[frame + 1].Time <= t) frame++;
-                var sprite = icon.Book.Sprites[frame];
+                var sprite = Drawing(icon.Book, frame);
                 if (icon.Card.sprite == null || icon.Card.sprite.Pointer != sprite.Pointer) icon.Card.sprite = sprite;
             }
         }
 
         // ── Drawing ─────────────────────────────────────────────────────
 
+        // Only the drawing the card rests on is made now: each takes about 15 ms, so drawing
+        // them all here held up the level load by most of a second. Update makes the rest,
+        // one per frame, and one needed on screen before its turn is made right away.
         private static Flipbook Book(Kind kind)
         {
-            if (_books.TryGetValue(kind, out var book) && book.Sprites.All(s => s != null)) return book;
-            book = Define(kind);
-            book.Sprites = book.Frames.Select(f => Render(book, f)).ToArray();
-            _books[kind] = book;
+            if (!_books.TryGetValue(kind, out var book))
+            {
+                book = Define(kind);
+                book.Sprites = new Sprite[book.Frames.Length];
+                _books[kind] = book;
+            }
+            Drawing(book, book.Frames.Length - 1);
             return book;
+        }
+
+        // Also made again when the game destroyed it.
+        private static Sprite Drawing(Flipbook book, int frame)
+        {
+            if (book.Sprites[frame] == null) book.Sprites[frame] = Render(book, book.Frames[frame]);
+            return book.Sprites[frame];
+        }
+
+        private static void DrawNext()
+        {
+            foreach (var book in _books.Values)
+            {
+                for (int frame = 0; frame < book.Sprites.Length; frame++)
+                {
+                    if (book.Sprites[frame] != null) continue;
+                    Drawing(book, frame);
+                    return;
+                }
+            }
         }
 
         private static Sprite Render(Flipbook book, Frame frame)
@@ -142,26 +170,29 @@ namespace OfficialSpeedrunMod
                 wrapMode = TextureWrapMode.Clamp,
                 hideFlags = HideFlags.HideAndDontSave,
             };
+            // Drawn with .NET's own math: Unity's Mathf and Vector2 are calls into the game in
+            // this interop, and millions of them made the first level load wait seconds.
             var pixels = new Color32[Width * Height];
-            var parts = book.Parts.Select(p => (p, Get(frame, p.Name))).Where(x => !x.Item2.Hidden).ToArray();
-            float iconScale = Mathf.Min(Mathf.Abs(frame.Icon.Scale.x), Mathf.Abs(frame.Icon.Scale.y));
+            var icon = new Undoer(book.Pivot, frame.Icon);
+            var parts = book.Parts.Select(p => (part: p, pose: Get(frame, p.Name))).Where(x => !x.pose.Hidden)
+                .Select(x => (x.part, undo: new Undoer(x.part.Pivot, x.pose), scale: MathF.Min(MathF.Abs(x.pose.Scale.X), MathF.Abs(x.pose.Scale.Y))))
+                .ToArray();
+            float iconScale = MathF.Min(MathF.Abs(frame.Icon.Scale.X), MathF.Abs(frame.Icon.Scale.Y));
             for (int y = 0; y < Height; y++)
             {
                 for (int x = 0; x < Width; x++)
                 {
                     // Canvas pixel to design units, undoing the icon's pose.
-                    var p = new Vector2((x + 0.5f - Width / 2f) / Zoom + Size / 2f, (y + 0.5f - Bottom) / Zoom);
-                    if (p.x < -20f || p.x > Size + 20f) continue;
-                    p = Undo(p, book.Pivot, frame.Icon);
+                    var p = new Vec((x + 0.5f - Width / 2f) / Zoom + Size / 2f, (y + 0.5f - Bottom) / Zoom);
+                    if (p.X < -20f || p.X > Size + 20f) continue;
+                    p = icon.Apply(p);
                     float d = float.MaxValue;
-                    foreach (var (part, pose) in parts)
-                    {
-                        float scale = Mathf.Min(Mathf.Abs(pose.Scale.x), Mathf.Abs(pose.Scale.y));
-                        d = Mathf.Min(d, part.Distance(Undo(p, part.Pivot, pose)) * scale);
-                    }
+                    foreach (var (part, undo, scale) in parts)
+                        d = MathF.Min(d, part.Distance(undo.Apply(p)) * scale);
                     // Antialiased: the pixel's coverage of the ink, a canvas pixel wide.
-                    float alpha = Mathf.Clamp01(0.5f - d * iconScale * Zoom);
-                    if (alpha > 0f) pixels[y * Width + x] = new Color32(255, 255, 255, (byte)(alpha * 255f));
+                    float alpha = Clamp01(0.5f - d * iconScale * Zoom);
+                    // Fields set one by one: Color32's constructor is a call into the game too.
+                    if (alpha > 0f) pixels[y * Width + x] = new Color32 { r = 255, g = 255, b = 255, a = (byte)(alpha * 255f) };
                 }
             }
             tex.SetPixels32(pixels);
@@ -173,13 +204,29 @@ namespace OfficialSpeedrunMod
 
         private static Pose Get(Frame frame, string part) => frame.Parts.TryGetValue(part, out var pose) ? pose : Pose.Rest;
 
-        // A point of the posed drawing back to where it is in the shape's own space.
-        private static Vector2 Undo(Vector2 p, Vector2 pivot, Pose pose)
+        // Takes a point of the posed drawing back to where it is in the shape's own space. The
+        // turn is worked out once per pose, not once per pixel.
+        private readonly struct Undoer
         {
-            var q = p - pivot - pose.Offset;
-            float a = -pose.Angle * Mathf.Deg2Rad, c = Mathf.Cos(a), s = Mathf.Sin(a);
-            q = new Vector2(q.x * c - q.y * s, q.x * s + q.y * c);
-            return new Vector2(q.x / pose.Scale.x, q.y / pose.Scale.y) + pivot;
+            private readonly Vec _pivot, _offset, _scale;
+            private readonly float _cos, _sin;
+
+            public Undoer(Vec pivot, Pose pose)
+            {
+                _pivot = pivot;
+                _offset = pose.Offset;
+                _scale = pose.Scale;
+                float a = -pose.Angle * MathF.PI / 180f;
+                _cos = MathF.Cos(a);
+                _sin = MathF.Sin(a);
+            }
+
+            public Vec Apply(Vec p)
+            {
+                var q = p - _pivot - _offset;
+                q = new Vec(q.X * _cos - q.Y * _sin, q.X * _sin + q.Y * _cos);
+                return q / _scale + _pivot;
+            }
         }
 
         // ── The icons ───────────────────────────────────────────────────
@@ -226,11 +273,11 @@ namespace OfficialSpeedrunMod
         {
             var dots = new[] { V(18, 30), V(32, 22), V(48, 25), V(58, 37), V(66, 50), V(76, 60) };
             var tip = V(94, 52);
-            var parts = dots.Select((d, i) => P("Dot" + i, d.x, d.y, q => Disc(q, d.x, d.y, 6f))).ToList();
-            parts.Add(P("Shadow", tip.x, tip.y - 4, q => Ellipse(q, tip.x, tip.y - 4, 17, 4.5f)));
-            parts.Add(P("Pin", tip.x, tip.y, q => Min(
-                Ring(q, tip.x, tip.y + 42, 20), Disc(q, tip.x, tip.y + 42, 7),
-                Line(q, tip.x - 19, tip.y + 35, tip.x, tip.y), Line(q, tip.x + 19, tip.y + 35, tip.x, tip.y))));
+            var parts = dots.Select((d, i) => P("Dot" + i, d.X, d.Y, q => Disc(q, d.X, d.Y, 6f))).ToList();
+            parts.Add(P("Shadow", tip.X, tip.Y - 4, q => Ellipse(q, tip.X, tip.Y - 4, 17, 4.5f)));
+            parts.Add(P("Pin", tip.X, tip.Y, q => Min(
+                Ring(q, tip.X, tip.Y + 42, 20), Disc(q, tip.X, tip.Y + 42, 7),
+                Line(q, tip.X - 19, tip.Y + 35, tip.X, tip.Y), Line(q, tip.X + 19, tip.Y + 35, tip.X, tip.Y))));
 
             // The dots from `count` on are not drawn yet.
             (string, Pose)[] Shown(int count, params (string, Pose)[] extra) =>
@@ -288,8 +335,8 @@ namespace OfficialSpeedrunMod
             Parts = new[]
             {
                 P("Cup", 64, 16, q => Min(
-                    Line(q, 34, 98, 94, 98), Max(Ring(q, 64, 82, 30), q.y - 98),
-                    Max(Ring(q, 34, 82, 12), q.x - 34), Max(Ring(q, 94, 82, 12), 94 - q.x),
+                    Line(q, 34, 98, 94, 98), Max(Ring(q, 64, 82, 30), q.Y - 98),
+                    Max(Ring(q, 34, 82, 12), q.X - 34), Max(Ring(q, 94, 82, 12), 94 - q.X),
                     Line(q, 64, 52, 64, 32), Box(q, 42, 16, 86, 30, 3, false))),
                 P("Sparkle", 108, 108, q => Min(Line(q, 108, 98, 108, 118), Line(q, 98, 108, 118, 108))),
             },
@@ -336,9 +383,9 @@ namespace OfficialSpeedrunMod
 
         // ── Building blocks ─────────────────────────────────────────────
 
-        private static Vector2 V(float x, float y) => new Vector2(x, y);
+        private static Vec V(float x, float y) => new Vec(x, y);
 
-        private static Part P(string name, float px, float py, Func<Vector2, float> distance)
+        private static Part P(string name, float px, float py, Func<Vec, float> distance)
             => new Part { Name = name, Pivot = V(px, py), Distance = distance };
 
         private static Frame F(float time, Pose icon, params (string part, Pose pose)[] parts)
@@ -348,8 +395,8 @@ namespace OfficialSpeedrunMod
             return frame;
         }
 
-        private static Pose Whole(Vector2? o = null, float a = 0f, Vector2? s = null)
-            => new Pose { Offset = o ?? Vector2.zero, Angle = a, Scale = s ?? Vector2.one };
+        private static Pose Whole(Vec? o = null, float a = 0f, Vec? s = null)
+            => new Pose { Offset = o ?? Vec.Zero, Angle = a, Scale = s ?? Vec.One };
 
         private static Pose At(float x, float y, float angle, float sx, float sy)
             => new Pose { Offset = V(x, y), Angle = angle, Scale = V(sx, sy) };
@@ -360,41 +407,43 @@ namespace OfficialSpeedrunMod
 
         private static Pose Grow(float scale) => At(0f, 0f, 0f, scale, scale);
 
-        private static Pose Hide() => new Pose { Scale = Vector2.one, Hidden = true };
+        private static Pose Hide() => new Pose { Scale = Vec.One, Hidden = true };
 
         // Signed distances (negative inside the ink), in design units. Min is called for every
         // pixel of every frame, so it has overloads instead of a params array.
-        private static float Min(float a, float b) => Mathf.Min(a, b);
-        private static float Min(float a, float b, float c) => Mathf.Min(Mathf.Min(a, b), c);
-        private static float Min(float a, float b, float c, float d) => Mathf.Min(Mathf.Min(a, b), Mathf.Min(c, d));
-        private static float Min(float a, float b, float c, float d, float e) => Mathf.Min(Min(a, b, c, d), e);
-        private static float Min(float a, float b, float c, float d, float e, float f) => Mathf.Min(Min(a, b, c, d), Mathf.Min(e, f));
-        private static float Min(float a, float b, float c, float d, float e, float f, float g) => Mathf.Min(Min(a, b, c, d), Min(e, f, g));
+        private static float Min(float a, float b) => MathF.Min(a, b);
+        private static float Min(float a, float b, float c) => MathF.Min(MathF.Min(a, b), c);
+        private static float Min(float a, float b, float c, float d) => MathF.Min(MathF.Min(a, b), MathF.Min(c, d));
+        private static float Min(float a, float b, float c, float d, float e) => MathF.Min(Min(a, b, c, d), e);
+        private static float Min(float a, float b, float c, float d, float e, float f) => MathF.Min(Min(a, b, c, d), MathF.Min(e, f));
+        private static float Min(float a, float b, float c, float d, float e, float f, float g) => MathF.Min(Min(a, b, c, d), Min(e, f, g));
 
-        private static float Max(float a, float b) => Mathf.Max(a, b);
+        private static float Max(float a, float b) => MathF.Max(a, b);
 
-        private static float Line(Vector2 q, float ax, float ay, float bx, float by)
+        private static float Clamp01(float v) => MathF.Max(0f, MathF.Min(1f, v));
+
+        private static float Line(Vec q, float ax, float ay, float bx, float by)
         {
             float dx = bx - ax, dy = by - ay;
-            float k = Mathf.Clamp01(((q.x - ax) * dx + (q.y - ay) * dy) / (dx * dx + dy * dy));
-            return new Vector2(ax + dx * k - q.x, ay + dy * k - q.y).magnitude - Stroke;
+            float k = Clamp01(((q.X - ax) * dx + (q.Y - ay) * dy) / (dx * dx + dy * dy));
+            return new Vec(ax + dx * k - q.X, ay + dy * k - q.Y).Length() - Stroke;
         }
 
-        private static float Ring(Vector2 q, float cx, float cy, float r)
-            => Mathf.Abs((q - V(cx, cy)).magnitude - r) - Stroke;
+        private static float Ring(Vec q, float cx, float cy, float r)
+            => MathF.Abs((q - V(cx, cy)).Length() - r) - Stroke;
 
-        private static float Disc(Vector2 q, float cx, float cy, float r) => (q - V(cx, cy)).magnitude - r;
+        private static float Disc(Vec q, float cx, float cy, float r) => (q - V(cx, cy)).Length() - r;
 
-        private static float Ellipse(Vector2 q, float cx, float cy, float rx, float ry)
-            => (new Vector2((q.x - cx) / rx, (q.y - cy) / ry).magnitude - 1f) * Mathf.Min(rx, ry);
+        private static float Ellipse(Vec q, float cx, float cy, float rx, float ry)
+            => (new Vec((q.X - cx) / rx, (q.Y - cy) / ry).Length() - 1f) * MathF.Min(rx, ry);
 
         // A rounded box's outline (or the whole box).
-        private static float Box(Vector2 q, float x0, float y0, float x1, float y1, float r, bool filled)
+        private static float Box(Vec q, float x0, float y0, float x1, float y1, float r, bool filled)
         {
             float hx = (x1 - x0) / 2f - r, hy = (y1 - y0) / 2f - r;
-            float qx = Mathf.Abs(q.x - (x0 + x1) / 2f) - hx, qy = Mathf.Abs(q.y - (y0 + y1) / 2f) - hy;
-            float d = new Vector2(Mathf.Max(qx, 0f), Mathf.Max(qy, 0f)).magnitude + Mathf.Min(Mathf.Max(qx, qy), 0f) - r;
-            return filled ? d : Mathf.Abs(d) - Stroke;
+            float qx = MathF.Abs(q.X - (x0 + x1) / 2f) - hx, qy = MathF.Abs(q.Y - (y0 + y1) / 2f) - hy;
+            float d = new Vec(MathF.Max(qx, 0f), MathF.Max(qy, 0f)).Length() + MathF.Min(MathF.Max(qx, qy), 0f) - r;
+            return filled ? d : MathF.Abs(d) - Stroke;
         }
     }
 }

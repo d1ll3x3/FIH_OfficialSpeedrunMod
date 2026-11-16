@@ -93,6 +93,7 @@ namespace OfficialSpeedrunMod
 
         private static void Build(PhoneOsCanvas canvas)
         {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
             _builtFor = canvas.Pointer;
             _canvas = canvas;
             _sections.Clear();
@@ -136,7 +137,7 @@ namespace OfficialSpeedrunMod
                 // Again, so its scroll bar is sized for one more entry.
                 main.Init(canvas);
 
-                SpeedrunPlugin.Logger.LogInfo("Phone app: Speedrun added to the phone (Tab).");
+                SpeedrunPlugin.Logger.LogInfo($"Phone app: Speedrun added to the phone (Tab) in {watch.ElapsedMilliseconds} ms.");
             }
             catch (Exception ex)
             {
