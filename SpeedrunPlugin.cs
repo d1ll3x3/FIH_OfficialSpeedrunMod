@@ -10,7 +10,7 @@ using System.IO;
 
 namespace OfficialSpeedrunMod
 {
-    [BepInPlugin("com.flippingishard.officialspeedrunmod", "FIH Official Speedrun Mod", "1.1.1")]
+    [BepInPlugin("com.flippingishard.officialspeedrunmod", "FIH Official Speedrun Mod", "1.2.0")]
     public class SpeedrunPlugin : BasePlugin
     {
         internal static ManualLogSource Logger { get; private set; }
@@ -32,7 +32,7 @@ namespace OfficialSpeedrunMod
                 GameObject.DontDestroyOnLoad(go);
                 go.AddComponent<SpeedrunBehaviour>();
 
-                Logger.LogInfo($"Official Speedrun Mod loaded. Its menu is the Speedrun app in the phone (Tab); {ModConfig.RestartKey.Value} restarts.");
+                Logger.LogInfo($"Official Speedrun Mod loaded. Its menu is the Speedrun app in the phone (Tab); {ModConfig.Restart.Value} restarts.");
             }
             catch (Exception ex)
             {

@@ -1,7 +1,7 @@
 # FIH Official Speedrun Mod
 
 A BepInEx (IL2CPP) plugin for Flipping is Hard for practising levels: the trainer's
-teleports (every level start and every NPC of the story map), a restart key, a timer for
+teleports (every level start and every NPC of the story map), a restart bind (keyboard or gamepad), a timer for
 each level and the best time of every level.
 
 ## The Speedrun app
@@ -14,28 +14,42 @@ apps, with the keyboard or a gamepad:
   turned the way the level is climbed.
 - **Best times**: your best time on every level, and the game's own best time on every NPC
   challenge. Pick a level twice to reset its time.
+- **Hotkeys**: the restart binds and a hotkey for every teleport (see Hotkeys).
 
-The restart key (R by default) takes you back to the spawn while playing.
+Restart (R by default, or both sticks pressed in, L3 + R3, on a gamepad) takes you back to
+the spawn while playing.
 
 ## Spawn and restart
 
 The spawn is the last place the app or a teleport hotkey took you. On the story map,
 levels 1 to 10 land just before the level, so its timer starts as you walk in. The restart
-key (R by default) takes you back there, puts the level timer back to 0 and ends the NPC
+binds (R and L3 + R3 by default) take you back there, put the level timer back to 0 and end the NPC
 challenge in progress, the same way quitting it from the NPC does.
 
 ## Hotkeys
 
-The restart key and a key for every teleport are set in `OfficialSpeedrunMod.cfg`: a Unity
-key name, optionally with Ctrl, Shift and Alt (`R`, `Alpha1`, `Ctrl+F2`). They work while
-playing, not with the phone open. When several
-match, the one with the most modifiers wins, so `R` and `Shift+R` can do different things.
-They are `RestartKey` and the `Hotkeys` section.
+A bind is keys and gamepad buttons held together, keyboard and gamepad alike: `R`,
+`Ctrl+Alpha1`, `Pad.L3+Pad.R3`, even `Shift+Pad.A`. Restart can have as many binds as you
+like; every teleport has one. They work while playing, not with the phone open. When several
+match, the one with the most keys and buttons wins, so `R` and `Shift+R` can do different
+things.
+
+Set them in the app's **Hotkeys**: pick a row, then press the keys or buttons together and
+let go. Esc cancels, Delete removes the bind, and **Add restart bind** adds one. They are saved
+in `OfficialSpeedrunMod.cfg` (`Restart` and the `Hotkeys` section), where keys are Unity key
+names (or Ctrl, Shift, Alt for either side) and gamepad buttons are `Pad.A`, `Pad.B`, `Pad.X`,
+`Pad.Y`, `Pad.LB`, `Pad.RB`, `Pad.LT`, `Pad.RT`, `Pad.L3`, `Pad.R3`, `Pad.Start`,
+`Pad.Select`, `Pad.Up`, `Pad.Down`, `Pad.Left` and `Pad.Right` (Xbox names; the same buttons
+on any gamepad).
+
+Every gamepad button already does something in the game, and a bind doesn't stop it: L3 + R3
+also pings, and `Pad.Select` is the game's own quick restart. Tab and `Pad.Y` close the phone,
+so the app can't capture them (write them in the config instead).
 
 ## Level timer
 
 Times the level of the spawn you used: pick a level in the app (or with its hotkey) and
-that level is timed once, from entering it until you reach the next one. The restart key
+that level is timed once, from entering it until you reach the next one. Restart
 arms it again; an NPC teleport or loading a world turns it off. Passing through other
 levels never starts their timer or touches their best times.
 

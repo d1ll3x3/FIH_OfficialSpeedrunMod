@@ -21,7 +21,7 @@ namespace OfficialSpeedrunMod
     // no assets.
     public static class PhoneIcons
     {
-        public enum Kind { Stopwatch, Route, Chat, Trophy }
+        public enum Kind { Stopwatch, Route, Chat, Trophy, Gamepad }
 
         // The canvas, and the design grid the shapes are drawn on (Size units, y up), centered
         // on it at Zoom canvas pixels per unit: the drawings go from about 6 to 92% of the
@@ -189,6 +189,7 @@ namespace OfficialSpeedrunMod
             Kind.Stopwatch => Stopwatch(),
             Kind.Route => Route(),
             Kind.Chat => Chat(),
+            Kind.Gamepad => Gamepad(),
             _ => Trophy(),
         };
 
@@ -302,6 +303,34 @@ namespace OfficialSpeedrunMod
                 F(0.50f, Whole(), ("Sparkle", At(0, 0, -30, 1.35f, 1.35f))),
                 F(0.60f, Whole(), ("Sparkle", At(0, 0, -45, 0.9f, 0.9f))),
                 F(0.72f, Whole()),
+            },
+        };
+
+        // Hotkeys: the gamepad drops in squashed and springs up, the d-pad and the face buttons
+        // are pressed one after the other, and it rocks to a stop.
+        private static Flipbook Gamepad() => new Flipbook
+        {
+            Pivot = V(64, 22),
+            Parts = new[]
+            {
+                P("Pad", 64, 22, q => Min(
+                    Box(q, 8, 26, 120, 100, 30, false), Line(q, 25, 63, 51, 63), Line(q, 38, 50, 38, 76))),
+                P("Btn0", 90, 50, q => Disc(q, 90, 50, 7)),
+                P("Btn1", 103, 63, q => Disc(q, 103, 63, 7)),
+                P("Btn2", 90, 76, q => Disc(q, 90, 76, 7)),
+                P("Btn3", 77, 63, q => Disc(q, 77, 63, 7)),
+            },
+            Frames = new[]
+            {
+                F(0.00f, Whole(s: V(1.18f, 0.72f))),
+                F(0.10f, Whole(o: V(0, 6), s: V(0.92f, 1.1f))),
+                F(0.20f, Whole(), ("Btn0", Grow(0.55f))),
+                F(0.30f, Whole(), ("Btn1", Grow(0.55f))),
+                F(0.40f, Whole(), ("Btn2", Grow(0.55f))),
+                F(0.50f, Whole(), ("Btn3", Grow(0.55f))),
+                F(0.60f, Whole(a: 5)),
+                F(0.70f, Whole(a: -2)),
+                F(0.80f, Whole()),
             },
         };
 
